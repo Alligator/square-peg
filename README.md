@@ -8,8 +8,8 @@ A proof of concept for a parsing expression grammar (PEG) library in javascript.
 |------|-------------|
 |`match(grammar, string)`|parse `string` using `grammar`. returns an array of `[success, captures]`|
 |`set(string)`|match any of the characters in the string.|
-|`choice(rules)`|match the first successful rule in `rules`. fails if none match.|
-|`range(string)`|match any character in the range given in string. e.g. `'az'`.|
+|`choice([...rules])`|match the first successful rule in `rules`. fails if none match.|
+|`range(string)`|match any character in the range given in `string`. e.g. `'az'`.|
 |`rule(name)`|match the rule in the grammar with the key `name`|
 |`some(rule)`|match `rule` one or more times|
 |`between(rule, min, max)`| match `rule` between `min` and `max` times|
@@ -47,7 +47,7 @@ const grammar = {
 };
 ```
 
-finally add a main rule to match any number of pairs follow by newlines:
+finally add a main rule to match any number of pairs followed by newlines:
 
 ```js
 const grammar = {
@@ -76,7 +76,7 @@ assert.strictEqual(success, true);
 
 ## captures
 
-Just matching text is cool, but you probably want to extract some values from it. Every rule function takes a tag as it's final parameter. When this is set square peg will capture the text that matched under that tag.
+Matching text is cool, but you probably want to extract some stuff from it too. Every rule function takes a tag as it's final parameter, when this is set square peg will capture the text that matched under that tag.
 
 Here's our grammar from above with added captures:
 ```js
@@ -91,7 +91,7 @@ const grammar = {
 };
 ```
 
-Note how the `pair` rule captures `key` and `value`, but since there are nested under the `main` rule that needs to capture too. If a rule doesn't have a tag, all of it's captures and ny captures by rules under it are thrown away.
+Note how the `pair` rule captures `key` and `value`, but the `main` rule that needs to capture too. If a rule doesn't have a tag, all of it's captures and captures by rules under it are thrown away.
 
 Calling this with this input:
 
@@ -115,4 +115,4 @@ returns this capture object:
 }
 ```
 
-`text` is all of the text the rule matched.  Rules that match a rule more than once (`some`, `between`) will have the `children` property, containing the captures for each time the rule matched.
+The structure will mirror the structure of the grammar. The `text` property contains all of the text the rule matched.  Rules that match more than once (`some`, `between`) will have a `children` property containing the captures for each time the rule matched.

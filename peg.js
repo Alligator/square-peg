@@ -155,8 +155,8 @@ function match(grammar, string) {
   let current = string;
   let rules = grammar;
 
-  // treat an array like a grammar with one main rule
-  if (Array.isArray(grammar)) {
+  // if the grammar has no main property, assume it's a single rule
+  if (!grammar.main) {
     rules = { main: grammar };
   }
 
@@ -164,7 +164,7 @@ function match(grammar, string) {
   const ctx = { grammar: rules };
 
   const [success, matchLength, captures] = matchRule(ctx, mainRule, current);
-  if (!success) {
+  if (!success || matchLength !== string.length) {
     return [false, []];
   }
 

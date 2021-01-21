@@ -122,18 +122,18 @@ function matchRule(ctx, rule, text) {
   if (rule.type === 'between') {
     let matchCount = 0;
     let totalLength = 0;
-    let allCaptures = {};
+    let allCaptures = [];
     while (true) {
       const [success, matchLength, captures] = matchRule(ctx, rule.rule, text.slice(totalLength));
       if (!success) {
         break;
       }
       totalLength += matchLength;
-      if (captures) {
-        allCaptures = {
+      if (captures && Object.keys(captures).length) {
+        allCaptures = [
           ...allCaptures,
-          ...captures,
-        };
+          captures,
+        ];
       }
       matchCount++;
       if (matchCount === rule.max) {

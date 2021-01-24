@@ -1,6 +1,3 @@
-const assert = require('assert');
-const util = require('util');
-
 function capture(ctx, rule, text) {
   if (typeof rule.capture === 'boolean') {
     ctx.captures.push(text);
@@ -10,8 +7,6 @@ function capture(ctx, rule, text) {
 }
 
 function matchRule(ctx, rule, text) {
-  // console.log(util.inspect(text), rule.type || rule);
-
   if (typeof rule === 'string') {
     if (text.startsWith(rule)) {
       capture(ctx, rule, text);
@@ -47,7 +42,6 @@ function matchRule(ctx, rule, text) {
         return [true, matchLength];
       }
     }
-    // no matches
     return [false, 0];
   }
 

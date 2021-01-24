@@ -56,6 +56,17 @@ describe('some', () => {
   });
 });
 
+describe('any', () => {
+  test.each([
+    ['a', '', true],
+    ['a', 'a', true],
+    ['a', 'aa', true],
+    ['a', 'b', false],
+  ])('any(%s) %s', (any, string, expected) => {
+    expect(peg.match(peg.any(any), string)[0]).toBe(expected);
+  });
+});
+
 describe('between', () => {
   test.each([
     [['a', 1, 3], 'a', true],
@@ -72,7 +83,7 @@ describe('rule', () => {
   test('matches the referenced rule', () => {
     const grammar = {
       ref: 'hello',
-      main: [peg.rule('ref'), peg.rule('ref')],
+      main: peg.seq([peg.rule('ref'), peg.rule('ref')]),
     };
     expect(peg.match(grammar, 'hellohello')[0]).toBe(true);
   });
@@ -80,9 +91,18 @@ describe('rule', () => {
   test('fails if the rule fails', () => {
     const grammar = {
       ref: 'hello',
-      main: [peg.rule('ref'), peg.rule('ref')],
+      main: peg.seq([peg.rule('ref'), peg.rule('ref')]),
     };
     expect(peg.match(grammar, 'helloolleh')[0]).toBe(false);
+  });
+
+  test('throws an error if the rule is not found', () => {
+    const grammar = {
+      main: peg.rule('nope'),
+    };
+    expect(() => {
+      peg.match(grammar, '');
+    }).toThrow(/rule "nope" not found/);
   });
 });
 
@@ -98,120 +118,57 @@ describe('match', () => {
   test('fails if the rule partially matches', () => {
     expect(peg.match('ab', 'abc')[0]).toBe(false);
   });
+
+  test('throws an error if a rule cannot be processed', () => {
+    expect(() => {
+      peg.match({ not: 'a rule' });
+    }).toThrow(/could not process rule/);
+  });
 });
 
 describe('captures', () => {
   test('basic', () => {
-    const [_, captures] = peg.match(peg.range('ac', 'captured'), 'b');
-    expect(captures).toEqual({
-      captured: {
-        text: 'b',
-      },
-    });
+    const [success, captures] = peg.match(peg.range('09', true), '4');
+    expect(captures).toEqual(['4']);
   });
 
-  test('multiple', () => {
-    const [_, captures] = peg.match(peg.some(peg.choice(['a', 'b', 'c'], 'item'), 'captured'), 'abc');
-    expect(captures).toEqual({
-      captured: {
-        text: 'abc',
-        children: [
-          { item: { text: 'a' } },
-          { item: { text: 'b' } },
-          { item: { text: 'c' } },
-        ],
-      },
-    });
+  test('repeated', () => {
+    const [success, captures] = peg.match(peg.some(peg.range('09', true)), '456');
+    expect(captures).toEqual(['4', '5', '6']);
   });
 
-  test('nested', () => {
+  test('parent and child', () => {
+    const [success, captures] = peg.match(peg.some(peg.range('09', true), true), '456');
+    expect(captures).toEqual(['4', '5', '6', '456']);
+  });
+
+  test('named', () => {
+    const [success, captures] = peg.match(peg.some(peg.range('09', 'digit'), 'digits'), '456');
+    expect(captures).toEqual([
+      { type: 'digit', text: '4' },
+      { type: 'digit', text: '5' },
+      { type: 'digit', text: '6' },
+      { type: 'digits', text: '456' },
+    ]);
+  });
+
+  test('capture groups', () => {
     const grammar = {
-      a: peg.some(peg.rule('b'), 'a'),
-      b: peg.some(peg.rule('c'), 'b'),
-      c: peg.range('aa', 'c'),
-      main: peg.some(peg.rule('a'), 'main'),
+      digit: peg.range('09'),
+      numbers: peg.captureGroup(peg.some(peg.seq([
+        peg.some(peg.rule('digit'), true),
+        peg.any(' '),
+      ]))),
+      main: peg.some(peg.seq([
+        peg.some(peg.rule('numbers')),
+        '\n',
+      ])),
     };
-    const [_, captures] = peg.match(grammar, 'aaa');
-
-    expect(captures).toEqual({
-      main: {
-        text: 'aaa',
-        children: [
-          {
-            a: {
-              text: 'aaa',
-              children: [
-                {
-                  b: {
-                    text: 'aaa',
-                    children: [
-                      { c: { text: 'a' } },
-                      { c: { text: 'a' } },
-                      { c: { text: 'a' } },
-                    ],
-                  },
-                }
-              ],
-            }
-          }
-        ],
-      },
-    });
-
-  });
-
-  test('nested discards child captures', () => {
-    const grammar = {
-      a: peg.some(peg.rule('b'), 'a'),
-      b: peg.some(peg.rule('c'), 'b'),
-      c: peg.range('aa'), // no capture here
-      main: peg.some(peg.rule('a'), 'main'),
-    };
-    const [_, captures] = peg.match(grammar, 'aaa');
-
-    expect(captures).toEqual({
-      main: {
-        text: 'aaa',
-        children: [
-          {
-            a: {
-              text: 'aaa',
-              children: [
-                { b: { text: 'aaa' } }
-              ],
-            }
-          }
-        ],
-      },
-    });
-
-  });
-
-  test('array captures children', () => {
-    const [_, captures] = peg.match([peg.range('az', 'one'), peg.range('az', 'two')], 'gh');
-    expect(captures).toEqual({
-      one: { text: 'g' },
-      two: { text: 'h' },
-    });
-  });
-
-  test('between captures children', () => {
-    const [_, captures] = peg.match(peg.between(peg.range('az', 'char'), 1, 3, 'captured'), 'abc');
-    expect(captures).toEqual({
-      captured: {
-        text: 'abc',
-        children: [
-          { char: { text: 'a' } },
-          { char: { text: 'b' } },
-          { char: { text: 'c' } },
-        ]
-      }
-    });
-  });
-
-  test('throws an error on an unknown rule', () => {
-    expect(() => {
-      peg.match({ type: 'unknown' }, '');
-    }).toThrow(/could not process rule/);
+    const [success, captures] = peg.match(grammar, '123 456\n789\n');
+    expect(success).toBe(true);
+    expect(captures).toEqual([
+      ['123', '456'],
+      ['789'],
+    ]);
   });
 });

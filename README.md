@@ -2,19 +2,21 @@
 
 A proof of concept for a parsing expression grammar (PEG) library in javascript.
 
-## rules
+## functions
 
 | name | description |
 |------|-------------|
 |`match(grammar, string)`|parse `string` using `grammar`. returns an array of `[success, captures]`|
-|`set(string)`|match any of the characters in the string.|
-|`choice([...rules])`|match the first successful rule in `rules`. fails if none match.|
-|`range(string)`|match any character in the range given in `string`. e.g. `'az'`.|
+|`'literal string'`|match the string literally|
+|`set(string)`|match any of the characters in the string|
+|`range(string)`|match any character in the range given in `string`. e.g. `'az'`|
+|`choice([rule1, rule2, ...])`|match the first successful rule in `rules`. fails if none match|
+|`seq([rule1, rule2, ...])`|match each rule in sequence. fails if any fail|
 |`rule(name)`|match the rule in the grammar with the key `name`|
-|`some(rule)`|match `rule` one or more times|
 |`between(rule, min, max)`| match `rule` between `min` and `max` times|
-|`[rule1, rule2, ...]`|match each rule in the array in a sequence. if any fail the entire rule fails|
-|`'literal string'`|match the string literally.|
+|`some(rule)`|match `rule` one or more times|
+|`any(rule)`|match `rule` zero or more times|
+|`captureGroup(rule)`|match `rule` and put it's capture in a group (see below)|
 
 ## grammar
 
@@ -28,7 +30,7 @@ country: uk
 age: rude
 ```
 
-First of all, define some rules for characters and strings:
+First of all, define rules for characters and strings:
 
 ```js
 const grammar = {
@@ -43,7 +45,7 @@ then add a rule to match each pair:
 const grammar = {
   character: peg.range('az'),
   string: peg.some(peg.rule('character')),
-  pair: [peg.rule('string'), ': ', peg.rule('string')],
+  pair: peg.seq([peg.rule('string'), ': ', peg.rule('string')]),
 };
 ```
 
@@ -53,7 +55,7 @@ finally add a main rule to match any number of pairs followed by newlines:
 const grammar = {
   character: peg.range('az'),
   string: peg.some(peg.rule('character')),
-  pair: [peg.rule('string'), ': ', peg.rule('string')],
+  pair: peg.seq([peg.rule('string'), ': ', peg.rule('string')]),
   main: peg.some([
     peg.rule('pair'),
     '\n',
@@ -76,24 +78,14 @@ assert.strictEqual(success, true);
 
 ## captures
 
-Matching text is cool, but you probably want to extract some stuff from it too. Every rule function takes a tag as it's final parameter, when this is set square peg will capture the text that matched under that tag.
+Rules can also capture text. Every rule function takes a final parameter to control this. If it's `true`, any captured text will be pushed to the capture stack. If it's a string, an object will be pushed to the capture stack where the name property is the given string, and the text property is the captured text.
 
-Here's our grammar from above with added captures:
+Taking the grammar above, we can modify the pair rule to capture the key and value:
 ```js
-const grammar = {
-  character: peg.range('az'),
-  string: peg.some(peg.rule('character')),
-  pair: [peg.rule('string', 'key'), ': ', peg.rule('string', 'value')],
-  main: peg.some([
-    peg.rule('pair'),
-    '\n',
-  ], 'pairs'),
-};
+peg.seq([peg.rule('string', true), ': ', peg.rule('string', true)]),
 ```
 
-Note how the `pair` rule captures `key` and `value`, but the `main` rule that needs to capture too. If a rule doesn't have a tag, all of it's captures and captures by rules under it are thrown away.
-
-Calling this with this input:
+Matching this grammar with this input:
 
 ```
 name: alligator
@@ -101,18 +93,53 @@ country: uk
 age: rude
 ```
 
-returns this capture object:
+results in this set of captures:
+
 ```js
-{
-  pairs: {
-    text: 'name: alligator\ncountry: uk\nage: rude\n',
-    children: [
-      { key: { text: 'name' }, value: { text: 'alligator' } },
-      { key: { text: 'country' }, value: { text: 'uk' } },
-      { key: { text: 'age' }, value: { text: 'rude' } }
-    ]
-  }
-}
+[ 'name', 'alligator', 'country', 'uk', 'age', 'rude' ]
 ```
 
-The structure will mirror the structure of the grammar. The `text` property contains all of the text the rule matched.  Rules that match more than once (`some`, `between`) will have a `children` property containing the captures for each time the rule matched.
+Modifying the rule to use named captures:
+```js
+peg.seq([peg.rule('string', 'key'), ': ', peg.rule('string', 'value')]),
+```
+
+results in this:
+
+```js
+[
+  { type: 'key', text: 'name' },
+  { type: 'value', text: 'alligator' },
+  { type: 'key', text: 'country' },
+  { type: 'value', text: 'uk' },
+  { type: 'key', text: 'age' },
+  { type: 'value', text: 'rude' }
+]
+```
+
+## capture groups
+
+Sometimes you may want a rule to store it's captures in it's own capture stack instead of pushing them to the top level stack. This is achieved with the `captureGroup` function. It takes a rule as it's argument and pushes any captures that rule made as an array on to the stack.
+
+We could modify our pairs rule further to capture the key and array in a group:
+```js
+peg.captureGroup(peg.seq([peg.rule('string', true), ': ', peg.rule('string', true)])),
+```
+
+this wil result in this set of captures:
+```js
+[ [ 'name', 'alligator' ], [ 'country', 'uk' ], [ 'age', 'rude' ] ]
+```
+
+Here is final grammar with captures and capture groups:
+```js
+const grammar = {
+  character: peg.range('az'),
+  string: peg.some(peg.rule('character')),
+  pair: peg.captureGroup(peg.seq([peg.rule('string', true), ': ', peg.rule('string', true)])),
+  main: peg.some(peg.seq([
+    peg.rule('pair'),
+    '\n',
+  ])),
+};
+```

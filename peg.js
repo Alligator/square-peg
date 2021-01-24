@@ -1,76 +1,50 @@
 const assert = require('assert');
 const util = require('util');
 
-function getCapture(ctx, rule, text, matchLength, captures = null) {
-  if (rule.tag) {
-    return {
-      ...captures,
-      [rule.tag]: { text: text.slice(0, matchLength) },
-    };
+function capture(ctx, rule, text) {
+  if (typeof rule.capture === 'boolean') {
+    ctx.captures.push(text);
+  } else if (typeof rule.capture === 'string') {
+    ctx.captures.push({ type: rule.capture, text });
   }
-  return captures;
 }
 
-function getChildCaptures(ctx, rule, text, matchLength, childCaptures = null) {
-  if (rule.tag) {
-    if (childCaptures && childCaptures.length) {
-      return {
-        [rule.tag]: {
-          text: text.slice(0, matchLength),
-          children: childCaptures,
-        },
-      };
-    }
-    return {
-      [rule.tag]: {
-        text: text.slice(0, matchLength),
-      },
-    };
-  }
-  if (Array.isArray(rule)) {
-    return childCaptures;
-  }
-  return null;
-}
-
-// returns [success, matchLength, captures]
 function matchRule(ctx, rule, text) {
-  // console.log(util.inspect(text), util.inspect(rule));
+  // console.log(util.inspect(text), rule.type || rule);
 
   if (typeof rule === 'string') {
     if (text.startsWith(rule)) {
+      capture(ctx, rule, text);
       return [true, rule.length];
     }
     return [false, 0];
   }
 
-  if (Array.isArray(rule)) {
+  if (rule.type === 'seq') {
     let totalLength = 0;
-    let allCaptures = {};
-    for (let j = 0; j < rule.length; j++) {
-      const currentRule = rule[j];
-      const [success, matchLength, captures] = matchRule(ctx, currentRule, text.slice(totalLength));
+
+    for (let j = 0; j < rule.rules.length; j++) {
+      const currentRule = rule.rules[j];
+      const [success, matchLength] = matchRule(ctx, currentRule, text.slice(totalLength));
       if (!success) {
         return [false, 0];
       }
       totalLength += matchLength;
-      if (captures) {
-        allCaptures = {
-          ...allCaptures,
-          ...captures,
-        };
-      }
     }
-    const r = [true, totalLength, getChildCaptures(ctx, rule, text, totalLength, allCaptures)];
+
+    capture(ctx, rule, text.slice(0, totalLength));
+
+    const r = [true, totalLength];
     return r;
   }
 
   if (rule.type === 'choice') {
     for (let j = 0; j < rule.choices.length; j++) {
       const choice = rule.choices[j];
-      const [success, matchLength, captures] = matchRule(ctx, choice, text);
+      const [success, matchLength] = matchRule(ctx, choice, text);
       if (success) {
-        return [true, matchLength, getCapture(ctx, rule, text, matchLength, captures)];
+        capture(ctx, rule, text.slice(0, matchLength));
+        return [true, matchLength];
       }
     }
     // no matches
@@ -80,63 +54,37 @@ function matchRule(ctx, rule, text) {
   if (rule.type === 'range') {
     const char = text.charCodeAt(0);
     if (char >= rule.start && char <= rule.end) {
-      return [true, 1, getCapture(ctx, rule, text, 1)];
+      capture(ctx, rule, text[0]);
+      return [true, 1];
     }
     return [false, 0];
   }
 
   if (rule.type === 'rule') {
-    const [success, matchLength, captures] = matchRule(ctx, ctx.grammar[rule.name], text);
+    if (!ctx.grammar[rule.name]) {
+      throw new Error(`rule "${rule.name}" not found`);
+    }
+
+    const [success, matchLength] = matchRule(ctx, ctx.grammar[rule.name], text);
     if (success) {
-      return [success, matchLength, getCapture(ctx, rule, text, matchLength, captures)];
+      capture(ctx, rule, text.slice(0, matchLength));
+      return [success, matchLength];
     }
     return [false, 0];
-  }
-
-  if (rule.type === 'some') {
-    let totalLength = 0;
-    let matched = false;
-    let allCaptures = [];
-    while (true) {
-      const [success, matchLength, captures] = matchRule(ctx, rule.rule, text.slice(totalLength));
-      if (!success) {
-        break;
-      }
-      matched = true;
-      totalLength += matchLength;
-      if (captures && Object.keys(captures).length) {
-        allCaptures = [
-          ...allCaptures,
-          captures,
-        ];
-      }
-    }
-
-    if (!matched) {
-      return [false, 0];
-    }
-
-    return [true, totalLength, getChildCaptures(ctx, rule, text, totalLength, allCaptures)];
   }
 
   if (rule.type === 'between') {
     let matchCount = 0;
     let totalLength = 0;
-    let allCaptures = [];
+
     while (true) {
-      const [success, matchLength, captures] = matchRule(ctx, rule.rule, text.slice(totalLength));
+      const [success, matchLength] = matchRule(ctx, rule.rule, text.slice(totalLength));
       if (!success) {
         break;
       }
       totalLength += matchLength;
-      if (captures && Object.keys(captures).length) {
-        allCaptures = [
-          ...allCaptures,
-          captures,
-        ];
-      }
       matchCount++;
-      if (matchCount === rule.max) {
+      if (typeof rule.max === 'number' && matchCount === rule.max) {
         break;
       }
     }
@@ -145,7 +93,19 @@ function matchRule(ctx, rule, text) {
       return [false, 0];
     }
 
-    return [true, totalLength, getChildCaptures(ctx, rule, text, totalLength, allCaptures)];
+    capture(ctx, rule, text.slice(0, totalLength));
+
+    return [true, totalLength];
+  }
+
+  if (rule.type === 'capture-group') {
+    const tempCtx = { ...ctx, captures: [] };
+    const [success, matchLength] = matchRule(tempCtx, rule.rule, text);
+    if (!success) {
+      return [false, 0];
+    }
+    ctx.captures.push(tempCtx.captures);
+    return [success, matchLength];
   }
 
   throw new Error(`could not process rule ${JSON.stringify(rule)}`);
@@ -161,33 +121,36 @@ function match(grammar, string) {
   }
 
   const mainRule = rules.main;
-  const ctx = { grammar: rules };
+  const ctx = {
+    grammar: rules,
+    captures: [],
+  };
 
-  const [success, matchLength, captures] = matchRule(ctx, mainRule, current);
+  const [success, matchLength] = matchRule(ctx, mainRule, current);
   if (!success || matchLength !== string.length) {
     return [false, []];
   }
 
-  return [true, captures];
+  return [true, ctx.captures];
 }
 
-function set(text, tag) {
+function set(text, capture) {
   return {
     type: 'choice',
     choices: text.split(''),
-    tag,
+    capture,
   };
 }
 
-function choice(choices, tag) {
+function choice(choices, capture) {
   return {
     type: 'choice',
     choices,
-    tag,
+    capture,
   };
 }
 
-function range(text, tag) {
+function range(text, capture) {
   if (text.length !== 2) {
     throw new Error('range must be two characters');
   }
@@ -197,34 +160,49 @@ function range(text, tag) {
     type: 'range',
     start: start.charCodeAt(0),
     end: end.charCodeAt(0),
-    tag,
+    capture,
   };
 }
 
-function rule(name, tag) {
+function rule(name, capture) {
   return {
     type: 'rule',
     name,
-    tag,
+    capture,
   };
 }
 
-function some(rule, tag) {
-  return {
-    type: 'some',
-    rule,
-    tag,
-  };
-}
-
-function between(rule, min, max, tag) {
+function between(rule, min, max, capture) {
   return {
     type: 'between',
     rule,
     min,
     max,
-    tag,
+    capture,
   };
+}
+
+function seq(rules, capture) {
+  return {
+    type: 'seq',
+    rules,
+    capture,
+  };
+}
+
+function captureGroup(rule) {
+  return {
+    type: 'capture-group',
+    rule,
+  };
+}
+
+function some(rule, capture) {
+  return between(rule, 1, null, capture);
+}
+
+function any(rule, capture) {
+  return between(rule, 0, null, capture);
 }
 
 module.exports = {
@@ -235,4 +213,7 @@ module.exports = {
   rule,
   some,
   between,
+  any,
+  seq,
+  captureGroup,
 };
